@@ -1,5 +1,4 @@
 package com.example.taller2.logic
-
 import kotlin.random.Random
 
 /**
