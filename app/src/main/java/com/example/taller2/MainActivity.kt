@@ -147,28 +147,54 @@ fun JoinScreen(playerName: String, onPlayerNameChange: (String) -> Unit, roomId:
 fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel) {
     val currentPlayer = room.players[currentPlayerId] ?: return
     val messages by viewModel.messages.collectAsState()
+    val isHost = room.hostId == currentPlayerId
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Turno: ${room.currentTurn}/10 | Dinero: $${currentPlayer.money}", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Turno: ${room.currentTurn}/10 | Dinero: $${currentPlayer.money}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            if (isHost) Text("👑 HOST", color = Color.Blue, fontWeight = FontWeight.Bold)
+        }
+        
         Spacer(modifier = Modifier.height(16.dp))
 
         if (room.status == "WAITING") {
-            Button(onClick = { viewModel.startGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Empezar Juego") }
+            if (isHost) {
+                Button(onClick = { viewModel.startGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Empezar Juego") }
+            } else {
+                Box(modifier = Modifier.fillMaxWidth().background(Color.Yellow.copy(alpha = 0.2f)).padding(8.dp)) {
+                    Text("Esperando a que el host inicie la partida...", color = Color.DarkGray)
+                }
+            }
         }
 
-        LazyColumn(modifier = Modifier.height(100.dp)) {
-            items(room.players.values.toList()) { p -> Text("${p.name}: $${p.money} ${if (!p.isAlive) "❌" else ""}") }
+        Text("Jugadores conectados:", fontWeight = FontWeight.Bold)
+        LazyColumn(modifier = Modifier.height(120.dp)) {
+            items(room.players.values.toList()) { p -> 
+                Text("${p.name}: $${p.money} ${if (!p.isAlive) "❌ ELIMINADO" else ""} ${if (p.id == room.hostId) "(Host)" else ""}") 
+            }
         }
 
         if (room.status == "PLAYING" && currentPlayer.isAlive) {
             if (currentPlayer.turnPlayed < room.currentTurn) {
+                Text("Tu turno:", fontWeight = FontWeight.Bold)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "SAVE") }) { Text("Ahorrar") }
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "INVEST") }) { Text("Invertir") }
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "SPEND") }) { Text("Gastar") }
                 }
             } else {
-                Text("Esperando turno...", color = Color.Gray)
+                Text("Movimiento realizado. Esperando a los demás...", color = Color.Gray)
+            }
+        } else if (room.status == "FINISHED") {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.LightGray.copy(alpha = 0.3f))) {
+                Column(modifier = Modifier.padding(16.dp).align(Alignment.CenterHorizontally)) {
+                    Text("PARTIDA FINALIZADA", fontWeight = FontWeight.Bold)
+                    if (isHost) {
+                        Button(onClick = { viewModel.restartGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Nueva Partida") }
+                    } else {
+                        Text("El host debe iniciar una nueva partida")
+                    }
+                }
             }
         }
 
@@ -185,8 +211,10 @@ fun ChatSection(messages: List<ChatMessage>, onSendMessage: (String) -> Unit) {
             items(messages) { msg -> Text("${msg.senderName}: ${msg.text}", style = MaterialTheme.typography.bodySmall) }
         }
         Row {
-            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f))
-            Button(onClick = { if (text.isNotBlank()) { onSendMessage(text); text = "" } }) { Text(">") }
+            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), placeholder = { Text("Escribe...") })
+            IconButton(onClick = { if (text.isNotBlank()) { onSendMessage(text); text = "" } }) {
+                Text("OK")
+            }
         }
     }
 }

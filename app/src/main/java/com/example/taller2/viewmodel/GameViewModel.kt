@@ -8,7 +8,6 @@ import com.example.taller2.model.GameRoom
 import com.example.taller2.model.Player
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -56,7 +55,7 @@ class GameViewModel : ViewModel() {
     }
 
     fun signInWithGoogle(idToken: String, onSuccess: () -> Unit) {
-        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
         auth.signInWithCredential(credential)
             .addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }
             .addOnFailureListener { _authError.value = it.message }
@@ -76,16 +75,32 @@ class GameViewModel : ViewModel() {
         
         val player = Player(id = playerId, name = playerName)
         
-        database.child("rooms").child(roomId).child("id").addListenerForSingleValueEvent(object : ValueEventListener {
+        database.child("rooms").child(roomId).addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                if (!snapshot.exists()) {
-                    val initialRoom = mapOf("id" to roomId, "status" to "WAITING", "currentTurn" to 1)
-                    database.child("rooms").child(roomId).updateChildren(initialRoom)
+                val existingRoom = snapshot.getValue(GameRoom::class.java)
+                
+                if (existingRoom == null || existingRoom.status == "FINISHED") {
+                    // Si la sala no existe o terminó, la reiniciamos totalmente
+                    // El primer jugador en entrar a una sala limpia es el HOST
+                    val initialRoom = mapOf(
+                        "id" to roomId,
+                        "hostId" to playerId,
+                        "status" to "WAITING",
+                        "currentTurn" to 1,
+                        "players" to mapOf(playerId to player),
+                        "messages" to null
+                    )
+                    database.child("rooms").child(roomId).setValue(initialRoom)
+                        .addOnSuccessListener { observeRoom(roomId) }
+                } else {
+                    // Si el juego está en curso o esperando, solo nos unimos
+                    database.child("rooms").child(roomId).child("players").child(playerId).setValue(player)
+                        .addOnSuccessListener { observeRoom(roomId) }
                 }
-                database.child("rooms").child(roomId).child("players").child(playerId).setValue(player)
-                    .addOnSuccessListener { observeRoom(roomId) }
             }
-            override fun onCancelled(error: DatabaseError) {}
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("FirebaseGame", "Error joinRoom: ${error.message}")
+            }
         })
     }
 
@@ -95,14 +110,13 @@ class GameViewModel : ViewModel() {
                 val room = snapshot.getValue(GameRoom::class.java)
                 if (room != null) {
                     _gameRoom.value = room
-                    room.messages?.let { _messages.value = it.values.sortedBy { m -> m.timestamp } }
+                    _messages.value = room.messages.values.sortedBy { m -> m.timestamp }
                     if (room.status == "PLAYING") checkTurnCompletion(room)
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
         })
     }
-
 
     private fun checkTurnCompletion(room: GameRoom) {
         val activePlayers = room.players.values.filter { it.isAlive }
@@ -117,6 +131,9 @@ class GameViewModel : ViewModel() {
     }
 
     fun startGame(roomId: String) {
+        val room = _gameRoom.value ?: return
+        if (room.hostId != _currentPlayerId.value) return // Solo el host puede iniciar
+        
         database.child("rooms").child(roomId).child("status").setValue("PLAYING")
     }
 
@@ -144,11 +161,16 @@ class GameViewModel : ViewModel() {
     
     fun restartGame(roomId: String) {
         val room = _gameRoom.value ?: return
+        if (room.hostId != _currentPlayerId.value) return // Solo el host puede reiniciar
+        
         val updatedPlayers = room.players.mapValues { (_, p) ->
             p.copy(money = GameLogic.INITIAL_MONEY, isAlive = true, turnPlayed = 0, lastAction = "")
         }
         database.child("rooms").child(roomId).updateChildren(mapOf(
-            "status" to "WAITING", "currentTurn" to 1, "players" to updatedPlayers, "messages" to null
+            "status" to "WAITING",
+            "currentTurn" to 1,
+            "players" to updatedPlayers,
+            "messages" to null
         ))
     }
 }

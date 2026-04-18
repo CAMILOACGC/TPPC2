@@ -23,6 +23,7 @@ data class ChatMessage(
 @IgnoreExtraProperties
 data class GameRoom(
     val id: String = "",
+    val hostId: String = "",
     val status: String = "WAITING", // WAITING, PLAYING, FINISHED
     val currentTurn: Int = 1,
     val players: Map<String, Player> = emptyMap(),
