@@ -49,13 +49,17 @@ class GameViewModel : ViewModel() {
     }
 
     fun signOut() {
-        _currentPlayerId.value?.let { pid ->
-            _gameRoom.value?.id?.let { rid ->
-                database.child("rooms").child(rid).child("players").child(pid).removeValue()
-            }
-        }
+        leaveRoom()
         auth.signOut()
         _currentUser.value = null
+    }
+
+    fun leaveRoom() {
+        val pid = _currentPlayerId.value
+        val rid = _gameRoom.value?.id
+        if (pid != null && rid != null) {
+            database.child("rooms").child(rid).child("players").child(pid).removeValue()
+        }
         _currentPlayerId.value = null
         _gameRoom.value = null
         _messages.value = emptyList()
@@ -75,7 +79,6 @@ class GameViewModel : ViewModel() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val existingRoom = snapshot.getValue(GameRoom::class.java)
                 
-                // Si la sala no tiene Host, terminó o está vacía: LIMPIEZA TOTAL
                 if (existingRoom == null || existingRoom.hostId.isEmpty() || existingRoom.status == "FINISHED" || existingRoom.players.isEmpty()) {
                     database.child("rooms").child(roomId).removeValue().addOnSuccessListener {
                         val initialRoom = GameRoom(
@@ -122,6 +125,12 @@ class GameViewModel : ViewModel() {
 
     private fun checkTurnCompletion(room: GameRoom) {
         val activePlayers = room.players.values.filter { it.isAlive }
+        
+        if (activePlayers.size <= 1 && room.players.size > 1) {
+            database.child("rooms").child(room.id).child("status").setValue("FINISHED")
+            return
+        }
+
         val playersWhoPlayed = activePlayers.filter { it.turnPlayed == room.currentTurn }
         if (activePlayers.isNotEmpty() && playersWhoPlayed.size == activePlayers.size) {
             if (room.currentTurn < GameLogic.MAX_TURNS) {
@@ -148,9 +157,10 @@ class GameViewModel : ViewModel() {
         if (!player.isAlive || player.turnPlayed == room.currentTurn) return
         var newMoney = GameLogic.calculateNewMoney(player.money, action)
         newMoney = GameLogic.applyRandomEvent(newMoney)
-        val stillAlive = GameLogic.isPlayerAlive(newMoney)
+        val stillAlive = newMoney > 0
+        val finalMoney = if (stillAlive) newMoney else 0
         val updates = hashMapOf<String, Any>(
-            "players/$playerId/money" to if (stillAlive) newMoney else 0,
+            "players/$playerId/money" to finalMoney,
             "players/$playerId/isAlive" to stillAlive,
             "players/$playerId/turnPlayed" to room.currentTurn,
             "players/$playerId/lastAction" to action

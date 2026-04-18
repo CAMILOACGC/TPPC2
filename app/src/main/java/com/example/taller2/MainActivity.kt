@@ -150,9 +150,14 @@ fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel
     val isHost = room.hostId == currentPlayerId
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Turno: ${room.currentTurn}/10 | $${currentPlayer.money}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (isHost) Text(" HOST", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("Turno: ${room.currentTurn}/10 | $${currentPlayer.money}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                if (isHost) Text("HOST", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+            }
+            TextButton(onClick = { viewModel.leaveRoom() }) {
+                Text("SALIR", color = Color.Gray, fontWeight = FontWeight.Bold)
+            }
         }
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -167,14 +172,16 @@ fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel
 
         Spacer(modifier = Modifier.height(8.dp))
         Text("Jugadores:", fontWeight = FontWeight.Bold)
-        LazyColumn(modifier = Modifier.height(120.dp)) {
+        LazyColumn(modifier = Modifier.height(100.dp)) {
             items(room.players.values.toList()) { p -> 
                 Text("${p.name}: $${p.money} ${if (!p.isAlive) "❌" else ""} ${if (p.id == room.hostId) "(Host)" else ""}") 
             }
         }
 
-        if (room.status == "PLAYING" && currentPlayer.isAlive) {
-            if (currentPlayer.turnPlayed < room.currentTurn) {
+        if (room.status == "PLAYING") {
+            if (!currentPlayer.isAlive) {
+                Text("HAS SIDO ELIMINADO", color = Color.Red, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
+            } else if (currentPlayer.turnPlayed < room.currentTurn) {
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "SAVE") }) { Text("Ahorrar") }
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "INVEST") }) { Text("Invertir") }
@@ -184,7 +191,8 @@ fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel
                 Text("Turno completado. Esperando...", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
             }
         } else if (room.status == "FINISHED") {
-            Text("FIN DE LA PARTIDA", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.Red, modifier = Modifier.align(Alignment.CenterHorizontally))
+            val hasWon = currentPlayer.isAlive && currentPlayer.money > 0
+            Text(if (hasWon) "¡HAS GANADO!" else "HAS PERDIDO", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = if (hasWon) Color.Green else Color.Red, modifier = Modifier.align(Alignment.CenterHorizontally))
             if (isHost) {
                 Button(onClick = { viewModel.restartGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Jugar de nuevo") }
             }
@@ -203,7 +211,13 @@ fun ChatSection(messages: List<ChatMessage>, onSendMessage: (String) -> Unit) {
             items(messages) { msg -> Text("${msg.senderName}: ${msg.text}", fontSize = 12.sp) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), placeholder = { Text("Chat...") }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+            TextField(
+                value = text, 
+                onValueChange = { text = it }, 
+                modifier = Modifier.weight(1f), 
+                placeholder = { Text("Chat...") }, 
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
+            )
             IconButton(onClick = { if (text.isNotBlank()) { onSendMessage(text); text = "" } }) {
                 Text("OK", fontSize = 10.sp)
             }
