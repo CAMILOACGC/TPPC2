@@ -8,6 +8,7 @@ import com.example.taller2.model.GameRoom
 import com.example.taller2.model.Player
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -35,37 +36,29 @@ class GameViewModel : ViewModel() {
     val authError: StateFlow<String?> = _authError
 
     fun signUp(email: String, pass: String, onSuccess: () -> Unit) {
-        if (email.isBlank() || pass.isBlank()) {
-            _authError.value = "Correo y contraseña obligatorios"
-            return
-        }
-        auth.createUserWithEmailAndPassword(email, pass)
-            .addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }
-            .addOnFailureListener { _authError.value = it.message }
+        auth.createUserWithEmailAndPassword(email, pass).addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }.addOnFailureListener { _authError.value = it.message }
     }
 
     fun signIn(email: String, pass: String, onSuccess: () -> Unit) {
-        if (email.isBlank() || pass.isBlank()) {
-            _authError.value = "Correo y contraseña obligatorios"
-            return
-        }
-        auth.signInWithEmailAndPassword(email, pass)
-            .addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }
-            .addOnFailureListener { _authError.value = it.message }
+        auth.signInWithEmailAndPassword(email, pass).addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }.addOnFailureListener { _authError.value = it.message }
     }
 
     fun signInWithGoogle(idToken: String, onSuccess: () -> Unit) {
-        val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
-        auth.signInWithCredential(credential)
-            .addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }
-            .addOnFailureListener { _authError.value = it.message }
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        auth.signInWithCredential(credential).addOnSuccessListener { _currentUser.value = auth.currentUser; onSuccess() }.addOnFailureListener { _authError.value = it.message }
     }
 
     fun signOut() {
+        _currentPlayerId.value?.let { pid ->
+            _gameRoom.value?.id?.let { rid ->
+                database.child("rooms").child(rid).child("players").child(pid).removeValue()
+            }
+        }
         auth.signOut()
         _currentUser.value = null
         _currentPlayerId.value = null
         _gameRoom.value = null
+        _messages.value = emptyList()
     }
 
     fun joinRoom(roomId: String, playerName: String) {
@@ -75,33 +68,42 @@ class GameViewModel : ViewModel() {
         
         val player = Player(id = playerId, name = playerName)
         
+        _gameRoom.value = null
+        _messages.value = emptyList()
+
         database.child("rooms").child(roomId).addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val existingRoom = snapshot.getValue(GameRoom::class.java)
                 
-                if (existingRoom == null || existingRoom.status == "FINISHED") {
-                    // Si la sala no existe o terminó, la reiniciamos totalmente
-                    // El primer jugador en entrar a una sala limpia es el HOST
-                    val initialRoom = mapOf(
-                        "id" to roomId,
-                        "hostId" to playerId,
-                        "status" to "WAITING",
-                        "currentTurn" to 1,
-                        "players" to mapOf(playerId to player),
-                        "messages" to null
-                    )
-                    database.child("rooms").child(roomId).setValue(initialRoom)
-                        .addOnSuccessListener { observeRoom(roomId) }
+                // Si la sala no tiene Host, terminó o está vacía: LIMPIEZA TOTAL
+                if (existingRoom == null || existingRoom.hostId.isEmpty() || existingRoom.status == "FINISHED" || existingRoom.players.isEmpty()) {
+                    database.child("rooms").child(roomId).removeValue().addOnSuccessListener {
+                        val initialRoom = GameRoom(
+                            id = roomId,
+                            hostId = playerId,
+                            status = "WAITING",
+                            currentTurn = 1,
+                            players = mapOf(playerId to player)
+                        )
+                        database.child("rooms").child(roomId).setValue(initialRoom).addOnSuccessListener { 
+                            setupPresence(roomId, playerId)
+                            observeRoom(roomId) 
+                        }
+                    }
                 } else {
-                    // Si el juego está en curso o esperando, solo nos unimos
                     database.child("rooms").child(roomId).child("players").child(playerId).setValue(player)
-                        .addOnSuccessListener { observeRoom(roomId) }
+                        .addOnSuccessListener { 
+                            setupPresence(roomId, playerId)
+                            observeRoom(roomId) 
+                        }
                 }
             }
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("FirebaseGame", "Error joinRoom: ${error.message}")
-            }
+            override fun onCancelled(error: DatabaseError) {}
         })
+    }
+
+    private fun setupPresence(roomId: String, playerId: String) {
+        database.child("rooms").child(roomId).child("players").child(playerId).onDisconnect().removeValue()
     }
 
     private fun observeRoom(roomId: String) {
@@ -132,9 +134,12 @@ class GameViewModel : ViewModel() {
 
     fun startGame(roomId: String) {
         val room = _gameRoom.value ?: return
-        if (room.hostId != _currentPlayerId.value) return // Solo el host puede iniciar
-        
+        if (room.hostId != _currentPlayerId.value) return 
         database.child("rooms").child(roomId).child("status").setValue("PLAYING")
+    }
+
+    fun resetEntireRoom(roomId: String) {
+        database.child("rooms").child(roomId).removeValue()
     }
 
     fun performAction(roomId: String, playerId: String, action: String) {
@@ -161,16 +166,18 @@ class GameViewModel : ViewModel() {
     
     fun restartGame(roomId: String) {
         val room = _gameRoom.value ?: return
-        if (room.hostId != _currentPlayerId.value) return // Solo el host puede reiniciar
-        
-        val updatedPlayers = room.players.mapValues { (_, p) ->
-            p.copy(money = GameLogic.INITIAL_MONEY, isAlive = true, turnPlayed = 0, lastAction = "")
-        }
-        database.child("rooms").child(roomId).updateChildren(mapOf(
+        if (room.hostId != _currentPlayerId.value) return 
+        val resetData = hashMapOf<String, Any?>(
             "status" to "WAITING",
             "currentTurn" to 1,
-            "players" to updatedPlayers,
             "messages" to null
-        ))
+        )
+        room.players.forEach { (id, _) ->
+            resetData["players/$id/money"] = GameLogic.INITIAL_MONEY
+            resetData["players/$id/isAlive"] = true
+            resetData["players/$id/turnPlayed"] = 0
+            resetData["players/$id/lastAction"] = ""
+        }
+        database.child("rooms").child(roomId).updateChildren(resetData)
     }
 }

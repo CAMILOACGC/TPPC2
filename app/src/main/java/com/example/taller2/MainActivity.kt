@@ -113,11 +113,11 @@ fun AuthScreen(viewModel: GameViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
         TextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         
-        if (authError != null) Text(authError!!, color = Color.Red, modifier = Modifier.padding(top = 8.dp))
+        if (authError != null) Text(authError!!, color = Color.Red, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(24.dp))
         Button(onClick = { viewModel.signIn(email, password) {} }, modifier = Modifier.fillMaxWidth(), enabled = email.isNotBlank() && password.length >= 6) { Text("Entrar") }
-        OutlinedButton(onClick = { viewModel.signUp(email, password) {} }, modifier = Modifier.fillMaxWidth(), enabled = email.isNotBlank() && password.length >= 6) { Text("Registrarse") }
+        OutlinedButton(onClick = { viewModel.signUp(email, password) {} }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp), enabled = email.isNotBlank() && password.length >= 6) { Text("Registrarse") }
         
         Spacer(modifier = Modifier.height(16.dp))
         HorizontalDivider()
@@ -136,7 +136,7 @@ fun JoinScreen(playerName: String, onPlayerNameChange: (String) -> Unit, roomId:
         Spacer(modifier = Modifier.height(32.dp))
         TextField(value = playerName, onValueChange = onPlayerNameChange, label = { Text("Nombre Jugador") }, modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(16.dp))
-        TextField(value = roomId, onValueChange = onRoomIdChange, label = { Text("Sala") }, modifier = Modifier.fillMaxWidth())
+        TextField(value = roomId, onValueChange = onRoomIdChange, label = { Text("ID de Sala") }, modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(32.dp))
         Button(onClick = onJoin, enabled = playerName.isNotBlank() && roomId.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Jugar") }
         TextButton(onClick = onSignOut) { Text("Cerrar Sesión") }
@@ -151,50 +151,42 @@ fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Turno: ${room.currentTurn}/10 | Dinero: $${currentPlayer.money}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (isHost) Text("👑 HOST", color = Color.Blue, fontWeight = FontWeight.Bold)
+            Text("Turno: ${room.currentTurn}/10 | $${currentPlayer.money}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            if (isHost) Text(" HOST", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
         }
         
         Spacer(modifier = Modifier.height(16.dp))
 
         if (room.status == "WAITING") {
             if (isHost) {
-                Button(onClick = { viewModel.startGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Empezar Juego") }
+                Button(onClick = { viewModel.startGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("INICIAR PARTIDA") }
             } else {
-                Box(modifier = Modifier.fillMaxWidth().background(Color.Yellow.copy(alpha = 0.2f)).padding(8.dp)) {
-                    Text("Esperando a que el host inicie la partida...", color = Color.DarkGray)
-                }
+                Text("Esperando inicio del host...", color = Color.Gray)
             }
         }
 
-        Text("Jugadores conectados:", fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Jugadores:", fontWeight = FontWeight.Bold)
         LazyColumn(modifier = Modifier.height(120.dp)) {
             items(room.players.values.toList()) { p -> 
-                Text("${p.name}: $${p.money} ${if (!p.isAlive) "❌ ELIMINADO" else ""} ${if (p.id == room.hostId) "(Host)" else ""}") 
+                Text("${p.name}: $${p.money} ${if (!p.isAlive) "❌" else ""} ${if (p.id == room.hostId) "(Host)" else ""}") 
             }
         }
 
         if (room.status == "PLAYING" && currentPlayer.isAlive) {
             if (currentPlayer.turnPlayed < room.currentTurn) {
-                Text("Tu turno:", fontWeight = FontWeight.Bold)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "SAVE") }) { Text("Ahorrar") }
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "INVEST") }) { Text("Invertir") }
                     Button(onClick = { viewModel.performAction(room.id, currentPlayerId, "SPEND") }) { Text("Gastar") }
                 }
             } else {
-                Text("Movimiento realizado. Esperando a los demás...", color = Color.Gray)
+                Text("Turno completado. Esperando...", color = Color.Gray, modifier = Modifier.padding(top = 16.dp))
             }
         } else if (room.status == "FINISHED") {
-            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.LightGray.copy(alpha = 0.3f))) {
-                Column(modifier = Modifier.padding(16.dp).align(Alignment.CenterHorizontally)) {
-                    Text("PARTIDA FINALIZADA", fontWeight = FontWeight.Bold)
-                    if (isHost) {
-                        Button(onClick = { viewModel.restartGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Nueva Partida") }
-                    } else {
-                        Text("El host debe iniciar una nueva partida")
-                    }
-                }
+            Text("FIN DE LA PARTIDA", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.Red, modifier = Modifier.align(Alignment.CenterHorizontally))
+            if (isHost) {
+                Button(onClick = { viewModel.restartGame(room.id) }, modifier = Modifier.fillMaxWidth()) { Text("Jugar de nuevo") }
             }
         }
 
@@ -206,14 +198,14 @@ fun GameScreen(room: GameRoom, currentPlayerId: String, viewModel: GameViewModel
 @Composable
 fun ChatSection(messages: List<ChatMessage>, onSendMessage: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
-    Column(modifier = Modifier.fillMaxWidth().height(200.dp).background(Color.LightGray.copy(alpha = 0.2f)).padding(8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().height(180.dp).background(Color.LightGray.copy(alpha = 0.1f)).padding(8.dp)) {
         LazyColumn(modifier = Modifier.weight(1f)) {
-            items(messages) { msg -> Text("${msg.senderName}: ${msg.text}", style = MaterialTheme.typography.bodySmall) }
+            items(messages) { msg -> Text("${msg.senderName}: ${msg.text}", fontSize = 12.sp) }
         }
-        Row {
-            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), placeholder = { Text("Escribe...") })
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f), placeholder = { Text("Chat...") }, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
             IconButton(onClick = { if (text.isNotBlank()) { onSendMessage(text); text = "" } }) {
-                Text("OK")
+                Text("OK", fontSize = 10.sp)
             }
         }
     }
